@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
@@ -12,12 +13,15 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=Noto+Serif+TC:wght@500;700;900&display=swap" rel="stylesheet">
 
-    <!-- Configuration -->
+    <!-- Tailwind Config -->
     <script>
       tailwind.config = {
         theme: {
@@ -54,8 +58,22 @@
             overscroll-behavior-y: none;
             -webkit-tap-highlight-color: transparent;
             margin: 0;
+            user-select: none;
         }
         
+        /* Mobile Frame Simulator */
+        #app-frame {
+            background-color: #F9F9F7;
+            max-width: 480px;
+            margin: 0 auto;
+            height: 100dvh;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        }
+
         /* Utilities */
         .no-scrollbar::-webkit-scrollbar { display: none; }
         .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -69,16 +87,23 @@
         }
         .animate-fade-in { animation: fadeIn 0.5s ease-out; }
 
-        /* Leaflet Overrides */
+        /* Drag & Drop Visuals */
+        .dragging {
+            opacity: 0.5;
+            background: #f3f4f6;
+            border: 2px dashed #0077BE !important;
+        }
+        
+        /* Progress Bar for Long Press */
+        .progress-bar-container {
+            position: absolute; top: 0; left: 0; height: 4px; 
+            background: #0077BE; transition: width 0.05s linear;
+            z-index: 20;
+        }
+
+        /* Leaflet Fixes */
         .leaflet-pane { z-index: 0 !important; }
         .leaflet-bottom { z-index: 1000 !important; }
-
-        /* Custom Markers */
-        .custom-user-location {
-            background-color: #0077BE;
-            width: 18px; height: 18px; border-radius: 50%;
-            border: 3px solid white; box-shadow: 0 0 15px rgba(0, 119, 190, 0.5);
-        }
         .custom-house-icon {
             background-color: #F26B3A; color: white;
             width: 32px; height: 32px; border-radius: 50%; border: 2px solid white;
@@ -86,25 +111,745 @@
             display: flex; align-items: center; justify-content: center;
         }
     </style>
-    <script type="importmap">
+<script type="importmap">
 {
   "imports": {
     "react": "https://esm.sh/react@^19.2.1",
-    "react-dom/client": "https://esm.sh/react-dom@^19.2.1/client",
     "react-dom/": "https://esm.sh/react-dom@^19.2.1/",
+    "react/": "https://esm.sh/react@^19.2.1/",
     "lucide-react": "https://esm.sh/lucide-react@^0.560.0",
     "react-leaflet": "https://esm.sh/react-leaflet@^5.0.0",
     "leaflet": "https://esm.sh/leaflet@^1.9.4",
-    "react-router-dom": "https://esm.sh/react-router-dom@^7.10.1",
-    "react/": "https://esm.sh/react@^19.2.1/"
+    "react-router-dom": "https://esm.sh/react-router-dom@^7.10.1"
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
 </head>
 <body>
-    <div id="root"></div>
-    <script type="module" src="./index.tsx"></script>
-<script type="module" src="/index.tsx"></script>
+
+    <div id="app-frame">
+        <!-- 1. Splash Screen -->
+        <div id="splash-screen" class="fixed inset-0 z-[100] cursor-pointer bg-black flex items-center justify-center transition-opacity duration-700">
+            <img src="https://i.pinimg.com/736x/a1/68/29/a168297e14852587d40f2ac06dd2a1e5.jpg" class="absolute inset-0 w-full h-full object-cover opacity-90">
+            <div class="absolute inset-0 bg-black/20 backdrop-blur-[2px]"></div>
+            <div class="relative text-white text-center z-10 animate-fade-in space-y-4">
+                <p class="text-xl font-sans tracking-[0.3em] font-light uppercase opacity-90">Welcome to</p>
+                <h1 class="text-6xl font-serif font-black tracking-wider drop-shadow-2xl">SABAH</h1>
+                <div class="w-12 h-1 bg-white/80 mx-auto rounded-full mt-6"></div>
+                <p class="text-xs font-sans mt-8 opacity-70 animate-pulse">點擊任意處開始</p>
+            </div>
+        </div>
+
+        <!-- 2. Dynamic Background Layer -->
+        <div id="bg-layer" class="absolute inset-0 z-0 transition-opacity duration-700">
+            <img id="bg-image" src="" class="w-full h-full object-cover hidden">
+            <div class="absolute inset-0 bg-white/20 backdrop-blur-[1px]"></div>
+        </div>
+
+        <!-- 3. Header (Static Structure) -->
+        <header id="main-header" class="relative z-20 bg-white/30 backdrop-blur-md shadow-sm border-b border-white/20 pb-2 hidden">
+            <div class="pt-safe pb-1 text-center mb-2">
+                <h2 class="text-2xl font-serif font-bold text-sabah-dark drop-shadow-sm mt-3">Sabah | 亞庇海中遊</h2>
+            </div>
+            <div class="flex items-center justify-between px-2">
+                <div id="date-selector" class="flex-1 overflow-x-auto gap-2 px-1 pb-1 no-scrollbar flex snap-x">
+                    <!-- Date buttons will be injected here -->
+                </div>
+                <div class="flex flex-col items-end pl-2 pr-4 gap-1 min-w-[80px]">
+                    <span class="bg-sabah-blue/90 text-white px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide shadow-sm">MALAYSIA</span>
+                    <div class="flex items-center gap-1.5 bg-white/90 px-2 py-1 rounded-lg shadow-sm">
+                        <i data-lucide="sun" class="w-4 h-4 text-sabah-yellow"></i>
+                        <div class="flex flex-col items-end leading-none">
+                            <span id="weather-temp" class="text-xs font-bold text-sabah-dark">--°C</span>
+                            <span id="weather-cond" class="text-[8px] text-gray-400 font-medium">--</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- 4. Main Content Container (Static Views) -->
+        <main id="main-content" class="flex-1 overflow-y-auto no-scrollbar relative z-10">
+            
+            <!-- View 1: Plan -->
+            <div id="view-plan" class="p-4 space-y-4 pb-24">
+                <!-- Content injected by JS -->
+            </div>
+            
+            <!-- View 2: Map -->
+            <div id="view-map" class="h-full w-full hidden relative">
+                <div id="map-container" class="w-full h-full bg-gray-200 z-0"></div>
+                <!-- Overlay -->
+                <div class="absolute top-4 left-4 right-4 z-[400] pointer-events-none">
+                    <div class="bg-white/90 backdrop-blur-md p-4 rounded-[20px] shadow-soft border border-white/50 flex justify-between items-center">
+                        <div>
+                            <h3 class="font-bold text-sabah-dark text-sm font-serif">今日地圖</h3>
+                            <p id="map-info-text" class="text-[10px] text-gray-500 font-bold uppercase tracking-wider">-- 個地點</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- View 3: Wallet -->
+            <div id="view-wallet" class="p-6 hidden pt-safe pb-24"></div>
+            
+            <!-- View 4: Shopping -->
+            <div id="view-shopping" class="p-6 hidden pt-safe pb-32"></div>
+            
+            <!-- View 5: Info -->
+            <div id="view-info" class="p-6 hidden pt-safe pb-24 space-y-4"></div>
+        </main>
+
+        <!-- 5. Bottom Navigation (Static Structure) -->
+        <nav class="relative z-50 bg-white/95 backdrop-blur-xl border-t border-gray-100 pb-safe shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
+            <div class="flex justify-between items-center px-4 py-2">
+                <button id="nav-plan" class="nav-btn group flex flex-col items-center gap-1 w-full text-sabah-blue" data-tab="plan">
+                    <div class="icon-container p-1.5 rounded-2xl bg-blue-50/80 scale-110 -translate-y-1 transition-all"><i data-lucide="calendar"></i></div>
+                    <span class="text-[10px] font-bold scale-110 transition-all">行程</span>
+                </button>
+                <button id="nav-map" class="nav-btn group flex flex-col items-center gap-1 w-full text-gray-400" data-tab="map">
+                    <div class="icon-container p-1.5 rounded-2xl bg-transparent transition-all"><i data-lucide="map"></i></div>
+                    <span class="text-[10px] font-bold scale-100 transition-all">地圖</span>
+                </button>
+                <button id="nav-wallet" class="nav-btn group flex flex-col items-center gap-1 w-full text-gray-400" data-tab="wallet">
+                    <div class="icon-container p-1.5 rounded-2xl bg-transparent transition-all"><i data-lucide="wallet"></i></div>
+                    <span class="text-[10px] font-bold scale-100 transition-all">記帳</span>
+                </button>
+                <button id="nav-shopping" class="nav-btn group flex flex-col items-center gap-1 w-full text-gray-400" data-tab="shopping">
+                    <div class="icon-container p-1.5 rounded-2xl bg-transparent transition-all"><i data-lucide="shopping-bag"></i></div>
+                    <span class="text-[10px] font-bold scale-100 transition-all">購物</span>
+                </button>
+                <button id="nav-info" class="nav-btn group flex flex-col items-center gap-1 w-full text-gray-400" data-tab="info">
+                    <div class="icon-container p-1.5 rounded-2xl bg-transparent transition-all"><i data-lucide="info"></i></div>
+                    <span class="text-[10px] font-bold scale-100 transition-all">資訊</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Hidden Inputs -->
+        <input type="file" id="image-upload-input" accept="image/*" class="hidden">
+    </div>
+
+    <!-- MAIN LOGIC -->
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        
+        // --- 1. DATA CONSTANTS ---
+        const LOCATIONS = {
+            BKI_AIRPORT: { lat: 5.9375, lng: 116.0510, name: "亞庇國際機場 (BKI)" },
+            JESSELTON_QUAY: { lat: 5.9904, lng: 116.0798, name: "Jesselton Quay (JQ)" },
+            BORENOS_CHICKEN: { lat: 5.9760, lng: 116.0738, name: "Borenos Fried Chicken" },
+            FOOK_YUEN_GAYA: { lat: 5.9845, lng: 116.0775, name: "富源茶餐廳 Fook Yuen" },
+            YEE_FUNG_LAKSA: { lat: 5.9830, lng: 116.0770, name: "怡豐茶室 Yee Fung Laksa" },
+            WISMA_MERDEKA: { lat: 5.9856, lng: 116.0777, name: "Wisma Merdeka" },
+            JESSELTON_POINT: { lat: 5.9890, lng: 116.0780, name: "Jesselton Point 碼頭" },
+            MANUKAN_ISLAND: { lat: 5.9644, lng: 116.0076, name: "Manukan 馬努干島" },
+            SAPI_ISLAND: { lat: 5.9606, lng: 116.0048, name: "Sapi 沙比島" },
+            YU_KEE_BAK_KUT_TEH: { lat: 5.9840, lng: 116.0772, name: "佑記肉骨茶 Yu Kee" },
+            SIN_KEE_BAK_KUT_TEH: { lat: 5.9825, lng: 116.0770, name: "新記肉骨茶 Sin Kee" },
+            API_API_NIGHT_MARKET: { lat: 5.9835, lng: 116.0772, name: "加雅街夜市" },
+            WOO_CAFE: { lat: 5.9818, lng: 116.0785, name: "Woo! Cafe" },
+            GUANS_KOPITIAM: { lat: 5.9835, lng: 116.0775, name: "源茶室 Guan's Kopitiam" },
+            UMS_MOSQUE: { lat: 6.0367, lng: 116.1186, name: "沙巴大學粉紅清真寺" },
+            JIA_XIANG_LINTAS: { lat: 5.9490, lng: 116.0920, name: "家香生肉麵" },
+            IMAGO_MALL: { lat: 5.9705, lng: 116.0667, name: "Imago Shopping Mall" },
+            TANJUNG_ARU_BEACH: { lat: 5.9482, lng: 116.0447, name: "丹絨亞路海灘 Beach 2" },
+            WELCOME_SEAFOOD: { lat: 5.9765, lng: 116.0740, name: "大茄來海鮮" },
+            KAMA_SPA: { lat: 5.9815, lng: 116.0782, name: "Kama'A Spa" }
+        };
+
+        const INITIAL_ITINERARY = [
+            {
+                date: '2026-01-09', weatherTemp: 27, weatherCondition: 'Cloudy',
+                bgImage: 'https://i.pinimg.com/736x/a4/ae/3f/a4ae3f8d0c49e9cbf2e725a42e6d24ba.jpg',
+                flight: { departureTime: '19:15', departureCode: 'TPE', departureAirport: 'TPE T1', arrivalTime: '22:50', arrivalCode: 'BKI', arrivalAirport: 'BKI T1', airline: 'AirAsia', aircraft: 'A320' },
+                items: [
+                    { id: '1-1', time: '22:30', duration: 40, activity: '抵達亞庇國際機場', location: 'BKI Airport', coords: LOCATIONS.BKI_AIRPORT, type: 'transport', travelTime: 'Grab 20分' },
+                    { id: '1-2', time: '23:30', duration: 20, activity: '抵達住宿', location: 'Jesselton Quay', coords: LOCATIONS.JESSELTON_QUAY, type: 'relax', travelTime: '整理' },
+                    { id: '1-3', time: '23:50', duration: 60, activity: '宵夜 (二選一)', location: 'Swipe Options', coords: LOCATIONS.BORENOS_CHICKEN, type: 'food', options: [
+                        { activity: 'Borenos Fried Chicken', location: 'Asia City', coords: LOCATIONS.BORENOS_CHICKEN, notes: '好吃炸雞' },
+                        { activity: '富源茶餐廳', location: 'Gaya St', coords: LOCATIONS.FOOK_YUEN_GAYA, notes: '咖椰吐司' }
+                    ]}
+                ]
+            },
+            {
+                date: '2026-01-10', weatherTemp: 31, weatherCondition: 'Sunny',
+                bgImage: 'https://i.pinimg.com/1200x/39/b4/aa/39b4aa96ca7fe7de41f28623af1eaf8b.jpg',
+                items: [
+                    { id: '2-0', time: '09:00', duration: 0, activity: '從住宿出發', location: 'JQ', coords: LOCATIONS.JESSELTON_QUAY, type: 'transport', travelTime: 'Grab 15分' },
+                    { id: '2-1', time: '09:15', duration: 45, activity: '早餐：怡豐茶室', location: 'Gaya St', coords: LOCATIONS.YEE_FUNG_LAKSA, type: 'food', notes: '叻沙 Laksa', travelTime: '步行 5分' },
+                    { id: '2-2', time: '10:00', duration: 30, activity: '換錢', location: 'Wisma Merdeka', coords: LOCATIONS.WISMA_MERDEKA, type: 'activity', notes: '匯率最好', travelTime: '步行 5分' },
+                    { id: '2-3', time: '10:30', duration: 30, activity: '出海碼頭', location: 'Jesselton Point', coords: LOCATIONS.JESSELTON_POINT, type: 'transport', notes: '購票', travelTime: '船程 20分' },
+                    { id: '2-4a', time: '11:00', duration: 120, activity: '馬努干島', location: 'Manukan', coords: LOCATIONS.MANUKAN_ISLAND, type: 'activity', notes: '陽光沙灘', travelTime: '換島' },
+                    { id: '2-4b', time: '13:00', duration: 120, activity: '沙比島', location: 'Sapi', coords: LOCATIONS.SAPI_ISLAND, type: 'activity', notes: '浮潛', travelTime: '返回' },
+                    { id: '2-5', time: '19:00', duration: 75, activity: '晚餐：肉骨茶', location: 'Gaya St', coords: LOCATIONS.YU_KEE_BAK_KUT_TEH, type: 'food', travelTime: '步行 3分', options: [
+                        { activity: '佑記肉骨茶', location: 'Gaya St', coords: LOCATIONS.YU_KEE_BAK_KUT_TEH },
+                        { activity: '新記肉骨茶', location: 'Pantai St', coords: LOCATIONS.SIN_KEE_BAK_KUT_TEH }
+                    ]},
+                    { id: '2-6', time: '20:15', duration: 60, activity: '加雅街夜市', location: 'Gaya St', coords: LOCATIONS.API_API_NIGHT_MARKET, type: 'activity', notes: '週五六限定' }
+                ]
+            },
+            {
+                date: '2026-01-11', weatherTemp: 29, weatherCondition: 'Cloudy',
+                bgImage: 'https://i.pinimg.com/1200x/fd/d5/18/fdd5185cbab77d2e1abf50b54b1fc656.jpg',
+                items: [
+                    { id: '3-0', time: '10:30', duration: 0, activity: '從住宿出發', location: 'JQ', coords: LOCATIONS.JESSELTON_QUAY, type: 'transport', travelTime: 'Grab 15分' },
+                    { id: '3-1', time: '10:45', duration: 90, activity: '早午餐', location: 'Lorong Dewan', coords: LOCATIONS.WOO_CAFE, type: 'food', travelTime: '車程 90分', options: [
+                        { activity: 'Woo! Cafe', location: 'Lorong Dewan', coords: LOCATIONS.WOO_CAFE },
+                        { activity: "Guan's Kopitiam", location: 'Gaya St', coords: LOCATIONS.GUANS_KOPITIAM }
+                    ]},
+                    { id: '3-2', time: '13:30', duration: 360, activity: '長鼻猴 & 螢火蟲', location: 'Kawa Kawa', coords: LOCATIONS.JESSELTON_QUAY, type: 'activity', notes: '旅行社接送', travelTime: '車程 90分' },
+                    { id: '3-3', time: '21:30', duration: 60, activity: '宵夜', location: '富源', coords: LOCATIONS.FOOK_YUEN_GAYA, type: 'food' }
+                ]
+            },
+            {
+                date: '2026-01-12', weatherTemp: 32, weatherCondition: 'Sunny',
+                bgImage: 'https://i.pinimg.com/1200x/3d/2b/b9/3d2bb9a9e3ebc71f0b73692f93e19633.jpg',
+                items: [
+                    { id: '4-0', time: '10:40', duration: 0, activity: '從住宿出發', location: 'JQ', coords: LOCATIONS.JESSELTON_QUAY, type: 'transport', travelTime: 'Grab 20分' },
+                    { id: '4-1', time: '11:00', duration: 60, activity: '粉紅清真寺', location: 'UMS', coords: LOCATIONS.UMS_MOSQUE, type: 'activity', notes: '穿著得體', travelTime: 'Grab 20分' },
+                    { id: '4-2', time: '12:30', duration: 60, activity: '午餐：家香生肉麵', location: 'Lintas', coords: LOCATIONS.JIA_XIANG_LINTAS, type: 'food', travelTime: 'Grab 15分' },
+                    { id: '4-3', time: '14:00', duration: 180, activity: 'Imago 購物', location: 'Imago Mall', coords: LOCATIONS.IMAGO_MALL, type: 'activity', notes: 'Padini, Bata', travelTime: 'Grab 15分' },
+                    { id: '4-4', time: '17:30', duration: 90, activity: '丹絨亞路夕陽', location: 'Tanjung Aru', coords: LOCATIONS.TANJUNG_ARU_BEACH, type: 'relax', notes: '世界三大夕陽', travelTime: 'Grab 15分' },
+                    { id: '4-5', time: '19:30', duration: 90, activity: '晚餐：大茄來海鮮', location: 'Asia City', coords: LOCATIONS.WELCOME_SEAFOOD, type: 'food', notes: '濕奶油老虎蝦', travelTime: '步行 5分' },
+                    { id: '4-6', time: '21:30', duration: 30, activity: '按摩', location: 'Kama Spa', coords: LOCATIONS.KAMA_SPA, type: 'relax' }
+                ]
+            },
+            {
+                date: '2026-01-13', weatherTemp: 26, weatherCondition: 'Rain',
+                bgImage: 'https://i.pinimg.com/736x/7e/22/3f/7e223f12849b463bc9ce8caf19b59e53.jpg',
+                flight: { departureTime: '07:40', departureCode: 'BKI', departureAirport: 'BKI T1', arrivalTime: '10:55', arrivalCode: 'TPE', arrivalAirport: 'TPE T1', airline: 'AirAsia', aircraft: 'A320' },
+                items: [
+                    { id: '5-1', time: '04:45', duration: 15, activity: '起床 & 退房', location: 'JQ', coords: LOCATIONS.JESSELTON_QUAY, type: 'relax', travelTime: 'Grab 20分' },
+                    { id: '5-2', time: '05:00', duration: 0, activity: '出發去機場', location: 'BKI Airport', coords: LOCATIONS.BKI_AIRPORT, type: 'transport', notes: '回家 ✈️' }
+                ]
+            }
+        ];
+
+        const SHOPPING_ITEMS = [
+            { id: 1, name: "沙巴紅茶 (Sabah Tea)", rating: 5, imageUrl: "https://images.unsplash.com/photo-1597481499750-3e6b22637e12?q=80&w=200" },
+            { id: 2, name: "Eureka 爆米花", rating: 5, imageUrl: "https://images.unsplash.com/photo-1578849278619-e73505e9610f?q=80&w=200" },
+            { id: 3, name: "Bata 鞋子", rating: 4, imageUrl: "https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?q=80&w=200" },
+            { id: 4, name: "Fipper 夾腳拖", rating: 5, imageUrl: "https://images.unsplash.com/photo-1562124638-724e13052aaf?q=80&w=200" },
+            { id: 5, name: "A1 肉骨茶包", rating: 4, imageUrl: "https://images.unsplash.com/photo-1596040033229-a9821ebd058d?q=80&w=200" }
+        ];
+
+        // --- 2. GLOBAL STATE ---
+        let appState = {
+            activeTab: 'plan',
+            selectedDate: INITIAL_ITINERARY[0].date,
+            dayPlans: JSON.parse(JSON.stringify(INITIAL_ITINERARY)),
+            expenses: [],
+            isEditingId: null,
+            map: null
+        };
+
+        // --- 3. HELPER FUNCTIONS ---
+        function parseTime(timeStr) {
+            const [h, m] = timeStr.split(':').map(Number);
+            return h * 60 + m;
+        }
+
+        function formatTime(minutes) {
+            const h = Math.floor(minutes / 60) % 24;
+            const m = Math.floor(minutes % 60);
+            return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+        }
+
+        function parseTravelTime(str) {
+            if (!str) return 0;
+            const match = str.match(/(\d+)/);
+            return match ? parseInt(match[1]) : 0;
+        }
+
+        function recalculateSchedule(dayPlan) {
+            if (!dayPlan.items.length) return;
+            for (let i = 1; i < dayPlan.items.length; i++) {
+                const prevItem = dayPlan.items[i-1];
+                const prevStartTime = parseTime(prevItem.time);
+                const prevDuration = prevItem.duration || 60;
+                const travel = parseTravelTime(prevItem.travelTime);
+                const newStart = prevStartTime + prevDuration + travel;
+                dayPlan.items[i].time = formatTime(newStart);
+            }
+        }
+
+        // --- 4. CORE UI FUNCTIONS ---
+        
+        window.dismissSplash = function() {
+            const splash = document.getElementById('splash-screen');
+            splash.style.opacity = '0';
+            setTimeout(() => {
+                splash.style.display = 'none';
+                renderPlan(); // Initial render
+            }, 500);
+        }
+
+        window.switchTab = function(tabName) {
+            appState.activeTab = tabName;
+
+            // 1. Hide all views
+            ['plan', 'map', 'wallet', 'shopping', 'info'].forEach(t => {
+                document.getElementById('view-' + t).classList.add('hidden');
+                
+                // Update Nav Buttons
+                const btn = document.getElementById('nav-' + t);
+                const isActive = (t === tabName);
+                const iconContainer = btn.querySelector('.icon-container');
+                const label = btn.querySelector('span');
+                const icon = btn.querySelector('i');
+
+                // Toggle Classes
+                if (isActive) {
+                    btn.classList.remove('text-gray-400');
+                    btn.classList.add('text-sabah-blue');
+                    iconContainer.classList.remove('bg-transparent');
+                    iconContainer.classList.add('bg-blue-50/80', 'scale-110', '-translate-y-1');
+                    label.classList.add('scale-110');
+                    label.classList.remove('scale-100');
+                    if(icon) icon.setAttribute('stroke-width', '2.5');
+                } else {
+                    btn.classList.add('text-gray-400');
+                    btn.classList.remove('text-sabah-blue');
+                    iconContainer.classList.add('bg-transparent');
+                    iconContainer.classList.remove('bg-blue-50/80', 'scale-110', '-translate-y-1');
+                    label.classList.add('scale-100');
+                    label.classList.remove('scale-110');
+                    if(icon) icon.setAttribute('stroke-width', '2');
+                }
+            });
+
+            // 2. Show active view
+            document.getElementById('view-' + tabName).classList.remove('hidden');
+
+            // 3. Header & BG Logic
+            const header = document.getElementById('main-header');
+            const bgLayer = document.getElementById('bg-layer');
+            const bgImage = document.getElementById('bg-image');
+
+            if (tabName === 'plan') {
+                header.classList.remove('hidden');
+                bgLayer.classList.remove('hidden');
+                bgImage.classList.remove('hidden');
+                const plan = appState.dayPlans.find(d => d.date === appState.selectedDate);
+                if (plan) bgImage.src = plan.bgImage;
+                renderPlan();
+            } else {
+                header.classList.add('hidden');
+                bgLayer.classList.add('hidden');
+                if (tabName === 'map') initMap();
+                if (tabName === 'wallet') renderWallet();
+                if (tabName === 'shopping') renderShopping();
+                if (tabName === 'info') renderInfo();
+            }
+            
+            lucide.createIcons();
+        }
+
+        // Attach Nav Events
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.addEventListener('click', () => window.switchTab(btn.dataset.tab));
+        });
+
+        // --- 5. RENDER LOGIC ---
+
+        // PLAN
+        window.renderPlan = function() {
+            const container = document.getElementById('view-plan');
+            const plan = appState.dayPlans.find(d => d.date === appState.selectedDate);
+            if (!plan) return;
+
+            // Update Header info
+            document.getElementById('weather-temp').innerText = `${plan.weatherTemp}°C`;
+            document.getElementById('weather-cond').innerText = plan.weatherCondition;
+
+            // Render Date Selector
+            const dateContainer = document.getElementById('date-selector');
+            dateContainer.innerHTML = appState.dayPlans.map(d => {
+                const dateObj = new Date(d.date);
+                const dayName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dateObj.getDay()];
+                const isSelected = d.date === appState.selectedDate;
+                return `
+                    <button onclick="selectDate('${d.date}')" class="flex-shrink-0 flex flex-col items-center justify-center w-[42px] h-[54px] rounded-[14px] transition-all snap-center border-[1.5px] ${isSelected ? 'bg-sabah-blue border-sabah-blue text-white shadow-md scale-105' : 'bg-white/80 border-transparent text-gray-500'}">
+                        <span class="text-[8px] font-bold uppercase ${isSelected ? 'text-white/80' : 'text-gray-400'}">${dayName}</span>
+                        <span class="text-lg font-serif font-bold -mt-0.5">${dateObj.getDate()}</span>
+                    </button>
+                `;
+            }).join('');
+
+            let html = '';
+            
+            // Flight Info
+            if (plan.flight) {
+                const f = plan.flight;
+                html += `
+                <div class="bg-white/90 backdrop-blur-md rounded-[24px] p-5 shadow-card mb-4 border border-white/50 relative overflow-hidden">
+                    <div class="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-red-500 to-red-600"></div>
+                    <div class="flex justify-between items-center mb-6 mt-1">
+                        <div class="flex flex-col"><span class="text-4xl font-sans font-bold text-sabah-dark">${f.departureCode}</span><span class="text-2xl font-serif text-sabah-blue font-bold">${f.departureTime}</span></div>
+                        <div class="flex flex-col items-center flex-1 px-4 text-gray-300"><i data-lucide="plane" class="transform -rotate-45 w-8 h-8 mb-2"></i><div class="w-full h-[1px] bg-gray-300 border-t border-dashed"></div></div>
+                        <div class="flex flex-col items-end"><span class="text-4xl font-sans font-bold text-sabah-dark">${f.arrivalCode}</span><span class="text-2xl font-serif text-sabah-blue font-bold">${f.arrivalTime}</span></div>
+                    </div>
+                    <div class="flex items-center gap-2 bg-gray-50 p-2 rounded-xl">
+                        <span class="text-xs font-bold text-sabah-dark">${f.airline}</span>
+                        <span class="text-[10px] text-gray-400">${f.flightNumber}</span>
+                    </div>
+                </div>`;
+            }
+
+            html += `<div class="space-y-2 relative" id="itinerary-list">`;
+            
+            plan.items.forEach((item, index) => {
+                const isEditing = appState.isEditingId === item.id;
+                const typeColor = item.type === 'food' ? 'bg-sabah-orange' : item.type === 'relax' ? 'bg-sabah-green' : item.type === 'transport' ? 'bg-sabah-yellow text-sabah-dark' : 'bg-sabah-blue';
+                const textColor = item.type === 'transport' ? 'text-sabah-dark' : 'text-white';
+                
+                const showImage = isEditing || item.imageUrl;
+                const imageHtml = showImage ? `
+                    <div class="w-20 h-20 flex-shrink-0 rounded-2xl shadow-sm border border-white bg-gray-50 overflow-hidden relative cursor-pointer" onclick="${isEditing ? `triggerImageUpload('${item.id}')` : ''}">
+                        ${item.imageUrl ? `<img src="${item.imageUrl}" class="w-full h-full object-cover pointer-events-none">` : `<div class="w-full h-full flex items-center justify-center text-gray-300"><i data-lucide="image"></i></div>`}
+                        ${isEditing ? `<div class="absolute inset-0 bg-black/30 flex items-center justify-center text-white text-[10px]">更換</div>` : ''}
+                    </div>` : '';
+
+                const noteHtml = (isEditing || item.notes) ? `
+                    <div class="bg-white/50 p-3 rounded-xl border border-gray-100/50 mt-2 w-full">
+                        ${isEditing 
+                            ? `<textarea oninput="updateNote('${item.id}', this.value)" class="w-full text-xs bg-transparent outline-none resize-none h-16 font-sans" placeholder="輸入備註...">${item.notes || ''}</textarea>` 
+                            : `<p class="text-xs text-gray-500 font-serif">💡 ${item.notes}</p>`}
+                    </div>` : '';
+
+                const progressBarHtml = `<div id="progress-${item.id}" class="progress-bar-container w-0"></div>`;
+                const editBadge = isEditing ? `<div class="absolute top-2 right-2 bg-sabah-blue text-white text-[9px] px-2 py-0.5 rounded-full font-bold z-10 animate-fade-in pointer-events-none">編輯模式</div>` : '';
+
+                html += `
+                <div class="item-row flex gap-4 group" draggable="true" data-id="${item.id}" data-index="${index}">
+                    <div class="flex flex-col items-center pt-1">
+                         <div class="w-12 h-12 rounded-[18px] flex items-center justify-center shadow-sm z-10 ${typeColor} ${textColor}">
+                            <span class="text-[11px] font-bold font-serif tracking-wider">${item.time}</span>
+                         </div>
+                         ${(index < plan.items.length - 1) ? `<div class="h-full w-0.5 bg-gray-300/30 my-1"></div>` : ''}
+                    </div>
+                    
+                    <div class="flex-1 bg-white/85 backdrop-blur-md rounded-[24px] p-5 shadow-card border ${isEditing ? 'border-sabah-blue ring-2 ring-sabah-blue/20' : 'border-white/40'} relative overflow-hidden transition-all select-none"
+                         onmousedown="startLongPress('${item.id}')" ontouchstart="startLongPress('${item.id}')"
+                         onmouseup="cancelLongPress()" ontouchend="cancelLongPress()" onmouseleave="cancelLongPress()">
+                         
+                         ${progressBarHtml}
+                         ${editBadge}
+
+                         <div class="flex gap-4">
+                            <div class="drag-handle flex items-center justify-center text-gray-300 cursor-grab active:cursor-grabbing hover:text-gray-500" onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()">
+                                <i data-lucide="grip-vertical" width="20"></i>
+                            </div>
+
+                            <div class="flex-1">
+                                <div class="flex items-center gap-1.5 text-gray-400 text-[10px] font-bold uppercase tracking-wider mb-1">
+                                    <i data-lucide="clock" width="10"></i> ${item.type.toUpperCase()}
+                                </div>
+                                <h3 class="text-lg font-serif font-bold text-sabah-dark leading-tight mb-1">${item.activity}</h3>
+                                <div class="flex items-center gap-1 text-xs text-gray-500">
+                                    <i data-lucide="map-pin" width="12" class="text-sabah-blue"></i>
+                                    <span>${item.location}</span>
+                                </div>
+                                ${item.options ? `<div class="mt-2 flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                                    ${item.options.map(o => `<span class="text-[10px] bg-white border px-2 py-1 rounded-full whitespace-nowrap">${o.activity}</span>`).join('')}
+                                </div>` : ''}
+                            </div>
+                            ${imageHtml}
+                         </div>
+                         ${noteHtml}
+                    </div>
+                </div>`;
+
+                if (item.travelTime && index < plan.items.length - 1) {
+                    html += `
+                    <div class="flex items-center gap-2 ml-[18px] h-10 border-l-[2px] border-dashed border-gray-300 pl-4 relative my-1">
+                        <div class="absolute left-[-5px] top-1/2 -translate-y-1/2 w-2 h-2 rounded-full bg-gray-300"></div>
+                        <div class="flex items-center gap-1.5 bg-white/70 backdrop-blur px-2 py-1 rounded-full border border-gray-100 shadow-sm">
+                            <i data-lucide="arrow-down" width="10" class="text-gray-400"></i>
+                            <span class="text-[10px] font-bold text-gray-500">${item.travelTime}</span>
+                        </div>
+                    </div>`;
+                }
+            });
+            
+            html += `</div>`;
+            container.innerHTML = html;
+            lucide.createIcons();
+            setupDragAndDrop();
+        }
+
+        // --- 6. INTERACTION LOGIC ---
+
+        // Drag & Drop
+        function setupDragAndDrop() {
+            const list = document.getElementById('itinerary-list');
+            let draggedItem = null;
+
+            list.querySelectorAll('.item-row').forEach(row => {
+                const handle = row.querySelector('.drag-handle');
+                handle.addEventListener('mousedown', () => row.setAttribute('draggable', 'true'));
+                handle.addEventListener('touchstart', () => row.setAttribute('draggable', 'true'));
+                
+                row.addEventListener('dragstart', function(e) {
+                    draggedItem = this;
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', '');
+                    this.classList.add('dragging');
+                    appState.isEditingId = null; 
+                });
+
+                row.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                    if (this !== draggedItem) this.style.borderTop = '2px solid #0077BE';
+                });
+                
+                row.addEventListener('dragleave', function() { this.style.borderTop = ''; });
+
+                row.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    this.style.borderTop = '';
+                    if (this !== draggedItem) {
+                        const allRows = Array.from(list.querySelectorAll('.item-row'));
+                        const fromIndex = allRows.indexOf(draggedItem);
+                        const toIndex = allRows.indexOf(this);
+                        
+                        // Data Update
+                        const plan = appState.dayPlans.find(d => d.date === appState.selectedDate);
+                        const [movedItem] = plan.items.splice(fromIndex, 1);
+                        plan.items.splice(toIndex, 0, movedItem);
+                        
+                        recalculateSchedule(plan);
+                        renderPlan();
+                    }
+                });
+                
+                row.addEventListener('dragend', function() {
+                    this.classList.remove('dragging');
+                    list.querySelectorAll('.item-row').forEach(r => r.style.borderTop = '');
+                    this.setAttribute('draggable', 'false');
+                });
+            });
+        }
+
+        // Long Press
+        let pressTimer;
+        let progressInterval;
+        
+        window.startLongPress = function(id) {
+            if (appState.isEditingId === id) return; 
+
+            const bar = document.getElementById(`progress-${id}`);
+            if(!bar) return;
+            
+            let width = 0;
+            bar.style.width = '0%';
+            
+            progressInterval = setInterval(() => {
+                width += 2.5; 
+                if(width > 100) width = 100;
+                bar.style.width = width + '%';
+            }, 50);
+
+            pressTimer = setTimeout(() => {
+                clearInterval(progressInterval);
+                bar.style.width = '0%';
+                if (navigator.vibrate) navigator.vibrate(50);
+                appState.isEditingId = id;
+                renderPlan();
+            }, 2000);
+        }
+
+        window.cancelLongPress = function() {
+            clearTimeout(pressTimer);
+            clearInterval(progressInterval);
+            const bars = document.querySelectorAll('.progress-bar-container');
+            bars.forEach(b => b.style.width = '0%');
+        }
+
+        window.selectDate = function(date) {
+            appState.selectedDate = date;
+            appState.isEditingId = null; 
+            renderPlan();
+        }
+
+        window.updateNote = function(id, text) {
+            const plan = appState.dayPlans.find(d => d.date === appState.selectedDate);
+            const item = plan.items.find(i => i.id === id);
+            if (item) item.notes = text;
+        }
+
+        window.triggerImageUpload = function(id) {
+            const input = document.getElementById('image-upload-input');
+            input.onchange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        const plan = appState.dayPlans.find(d => d.date === appState.selectedDate);
+                        const item = plan.items.find(i => i.id === id);
+                        if (item) item.imageUrl = ev.target.result;
+                        renderPlan();
+                    };
+                    reader.readAsDataURL(file);
+                }
+            };
+            input.click();
+        }
+
+        // MAP
+        window.initMap = function() {
+            document.getElementById('view-map').classList.remove('hidden');
+            const plan = appState.dayPlans.find(d => d.date === appState.selectedDate);
+            
+            if (!appState.map) {
+                appState.map = L.map('map-container', { zoomControl: false }).setView([LOCATIONS.JESSELTON_QUAY.lat, LOCATIONS.JESSELTON_QUAY.lng], 13);
+                L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                    attribution: '© OpenStreetMap'
+                }).addTo(appState.map);
+            }
+            
+            appState.map.eachLayer((layer) => {
+                if (layer instanceof L.Marker) appState.map.removeLayer(layer);
+            });
+
+            const markers = [];
+            const homeIcon = L.divIcon({ className: 'custom-house-icon', html: '<i data-lucide="home" width="18"></i>', iconSize: [32,32] });
+            L.marker([LOCATIONS.JESSELTON_QUAY.lat, LOCATIONS.JESSELTON_QUAY.lng], { icon: homeIcon })
+             .addTo(appState.map).bindPopup("<b>住宿: JQ</b>");
+
+            if (plan) {
+                document.getElementById('map-info-text').innerText = `${plan.items.length} 個地點`;
+                const customIcon = L.icon({
+                    iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+                    shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+                    iconSize: [25, 41],
+                    iconAnchor: [12, 41],
+                    popupAnchor: [1, -34]
+                });
+
+                plan.items.forEach(item => {
+                    const mk = L.marker([item.coords.lat, item.coords.lng], {icon: customIcon})
+                        .addTo(appState.map)
+                        .bindPopup(`<b>${item.activity}</b><br>${item.location}`);
+                    markers.push(mk);
+                });
+            }
+
+            if (markers.length) {
+                const group = new L.featureGroup(markers);
+                appState.map.fitBounds(group.getBounds().pad(0.2));
+            }
+            setTimeout(() => appState.map.invalidateSize(), 100);
+            lucide.createIcons();
+        }
+
+        // WALLET
+        window.renderWallet = function() {
+            const container = document.getElementById('view-wallet');
+            const total = appState.expenses.reduce((sum, e) => sum + e.amount, 0);
+            
+            container.innerHTML = `
+                <div class="bg-sabah-dark rounded-[32px] p-6 text-white shadow-xl relative overflow-hidden mb-6">
+                    <div class="absolute -top-10 -right-10 w-48 h-48 bg-sabah-blue rounded-full blur-3xl opacity-20"></div>
+                    <div class="relative z-10">
+                        <h2 class="text-gray-400 text-xs font-bold uppercase tracking-widest mb-2">總支出 (NT$)</h2>
+                        <span class="text-4xl font-sans font-bold">${total.toLocaleString()}</span>
+                    </div>
+                </div>
+
+                <form onsubmit="addExpense(event)" class="bg-white rounded-[24px] p-5 shadow-card mb-6">
+                    <div class="bg-sabah-bg rounded-2xl p-4 mb-4 flex items-center gap-4">
+                        <div class="flex-1">
+                            <label class="text-[10px] font-bold text-gray-400 uppercase block mb-1">金額 (TWD)</label>
+                            <input id="ex-amount" type="number" class="w-full bg-transparent text-2xl font-bold text-sabah-dark outline-none" placeholder="0" required>
+                        </div>
+                    </div>
+                    <input id="ex-desc" type="text" class="w-full bg-white border-b-2 border-gray-100 p-3 text-sm mb-4 outline-none" placeholder="項目說明" required>
+                    <button type="submit" class="w-full bg-sabah-yellow text-sabah-dark font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                        <i data-lucide="plus"></i> 加入
+                    </button>
+                </form>
+
+                <div class="space-y-3">
+                    ${appState.expenses.slice().reverse().map(e => `
+                        <div class="bg-white p-4 rounded-2xl shadow-card flex justify-between items-center">
+                            <div>
+                                <p class="font-bold text-sabah-dark">${e.desc}</p>
+                                <p class="text-xs text-gray-400">${e.date}</p>
+                            </div>
+                            <span class="font-bold">NT$ ${e.amount}</span>
+                        </div>
+                    `).join('')}
+                    ${appState.expenses.length === 0 ? '<p class="text-center text-gray-300 text-sm">尚無消費紀錄</p>' : ''}
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        window.addExpense = function(e) {
+            e.preventDefault();
+            const amt = document.getElementById('ex-amount').value;
+            const desc = document.getElementById('ex-desc').value;
+            if (amt && desc) {
+                appState.expenses.push({ 
+                    id: Date.now(), 
+                    amount: parseInt(amt), 
+                    desc, 
+                    date: new Date().toLocaleDateString() 
+                });
+                renderWallet();
+            }
+        }
+
+        // SHOPPING
+        window.renderShopping = function() {
+            const container = document.getElementById('view-shopping');
+            container.innerHTML = `
+                <h2 class="text-3xl font-serif font-bold text-sabah-dark mb-6 mt-4">必買清單</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    ${SHOPPING_ITEMS.map(item => `
+                        <div class="bg-white/90 rounded-2xl p-3 shadow-card border border-white/50">
+                            <div class="aspect-square bg-gray-100 rounded-xl mb-3 overflow-hidden">
+                                <img src="${item.imageUrl}" class="w-full h-full object-cover">
+                            </div>
+                            <h4 class="font-bold text-sabah-dark text-xs mb-1">${item.name}</h4>
+                            <div class="flex gap-1 text-sabah-yellow"><i data-lucide="star" width="12" fill="currentColor"></i><span class="text-[10px] font-bold text-gray-500">${item.rating}</span></div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        // INFO
+        window.renderInfo = function() {
+            const container = document.getElementById('view-info');
+            container.innerHTML = `
+                 <h2 class="text-3xl font-serif font-bold text-sabah-dark mb-6 mt-4">旅遊資訊</h2>
+                 <div class="bg-white p-5 rounded-[24px] shadow-card">
+                    <div class="flex items-center gap-3 mb-3"><div class="p-2 bg-blue-50 text-blue-500 rounded-full"><i data-lucide="plug"></i></div><h3 class="font-bold">電壓與插座</h3></div>
+                    <p class="text-sm text-gray-600">英規三孔 (Type G)。需帶轉接頭。</p>
+                 </div>
+                 <div class="bg-white p-5 rounded-[24px] shadow-card">
+                    <div class="flex items-center gap-3 mb-3"><div class="p-2 bg-yellow-50 text-yellow-500 rounded-full"><i data-lucide="banknote"></i></div><h3 class="font-bold">換匯</h3></div>
+                    <p class="text-sm text-gray-600">推薦市區 Wisma Merdeka，匯率最佳。</p>
+                 </div>
+                 <div class="bg-white p-5 rounded-[24px] shadow-card">
+                    <div class="flex items-center gap-3 mb-3"><div class="p-2 bg-green-50 text-green-500 rounded-full"><i data-lucide="car"></i></div><h3 class="font-bold">交通</h3></div>
+                    <p class="text-sm text-gray-600">必載 Grab App。市區車資便宜。</p>
+                 </div>
+            `;
+            lucide.createIcons();
+        }
+
+        // --- INIT ---
+        // Click splash screen to start
+        document.getElementById('splash-screen').addEventListener('click', dismissSplash);
+        
+        // Render initial view hidden (waiting for splash)
+        // (Nothing needed here, user click triggers dismissSplash -> renderPlan)
+    });
+    </script>
 </body>
 </html>
