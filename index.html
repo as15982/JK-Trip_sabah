@@ -113,8 +113,7 @@
 
     <script type="text/babel" data-type="module">
       // 1. Imports 
-      // Using bare specifiers resolved by the Import Map above
-      import React, { useState, useEffect, useRef, useMemo } from 'react';
+      import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
       import ReactDOM from 'react-dom/client';
       import { HashRouter } from 'react-router-dom';
       import L from 'leaflet';
@@ -123,12 +122,16 @@
         MapPin, Clock, Plane, ArrowRight, Pencil, Check, X, ArrowDown, GripVertical, Image as ImageIcon,
         Plus, Coffee, Car, Home, ArrowRightLeft, CreditCard, Banknote, Users, Trash2,
         Star, AlertTriangle, ChevronDown, ChevronUp, Phone, Plug, FileText, User, Heart,
-        Shirt, Pill, Droplets, Zap, Shield, Camera, Utensils, MoreHorizontal
+        Shirt, Pill, Droplets, Zap, Shield, Camera, Utensils, MoreHorizontal, RefreshCw, Save
       } from 'lucide-react';
 
       // ----------------------------------------------------------------------
       // 2. Constants & Data
       // ----------------------------------------------------------------------
+      
+      const PANTRY_ID = '92fc2045-9b2e-4395-bf7c-0d30d8279f25';
+      const PANTRY_BASKET_NAME = 'sabah_travel_data';
+
       const EXCHANGE_RATE = 7.5;
       const FALLBACK_IMG = "https://images.unsplash.com/photo-1596422846543-75c6fc197f07?q=80&w=500&auto=format&fit=crop";
 
@@ -293,6 +296,16 @@
         { id: 'si-12', name: 'The Art Attic 文創', description: '當地藝術家設計的明信片、T恤、磁鐵，質感好。', rating: 4, imageUrl: 'https://images.unsplash.com/photo-1513519245088-0e12902e5a38?q=80&w=500' }
       ];
 
+      const DEFAULT_CHECKLIST = [
+        {id: 1, text: "護照 (效期 > 6個月)", checked: false},
+        {id: 2, text: "MDAC 電子入境卡填寫", checked: false},
+        {id: 3, text: "機票電子檔存手機", checked: false},
+        {id: 4, text: "萬用轉接頭 (英規三孔)", checked: false},
+        {id: 5, text: "Grab App 下載並綁卡", checked: false},
+        {id: 6, text: "台幣現金 (約 NT$ 10,000)", checked: false},
+        {id: 7, text: "腸胃藥 / 暈船藥 / 防蚊液", checked: false}
+      ];
+
       // ----------------------------------------------------------------------
       // 3. Components
       // ----------------------------------------------------------------------
@@ -453,10 +466,6 @@
             const dragged = _items.splice(dragItem.current, 1)[0];
             _items.splice(dragOverItem.current, 0, dragged);
             
-            // SIMULATED RECALCULATION:
-            // Since we don't have a real routing engine, we update the `travelTime` of the moved item
-            // to a generic value to simulate "Recalculating..." for UI feedback.
-            // In a real app, this would call an API.
             if (dragged.travelTime) {
                 dragged.travelTime = "計算中...";
                 setTimeout(() => {
@@ -705,39 +714,56 @@
             if (!activePlan || !mapInstance.current) return;
 
             const bounds = L.latLngBounds([]);
+            const processedCoords = new Set(); // Track unique locations
 
-            // Add Accommodation
-            const accMarker = L.marker([5.9904, 116.0798], { icon: houseIcon }).addTo(mapInstance.current).bindPopup(`
-                <div style="font-family: 'Noto Sans TC', sans-serif; padding: 4px;">
-                    <h3 style="font-weight: 700; color: #2D3436; margin-bottom: 4px; font-size: 14px;">住宿: Jesselton Quay</h3>
-                    <div style="font-size: 11px; color: #666; margin-bottom: 4px;">Jesselton Quay, 88000 Kota Kinabalu</div>
-                    <a href="https://maps.app.goo.gl/3R1xZLhLTuicD3GB6" target="_blank" style="color: #0077BE; text-decoration: none; font-size: 12px; display: flex; align-items: center; gap: 4px;">
-                        開啟 Google Maps 
-                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                    </a>
-                </div>
-            `);
-            accMarker.bindTooltip('住宿: Jesselton Quay', { permanent: true, direction: 'bottom', className: 'custom-map-label' });
-            markersRef.current.push(accMarker);
-            bounds.extend([5.9904, 116.0798]);
+            // Helper to add marker
+            const addMarker = (lat, lng, title, url, address, isAccommodation = false) => {
+                const key = `${lat.toFixed(5)},${lng.toFixed(5)}`;
+                if (processedCoords.has(key)) return; // Skip duplicates
 
-            // Add Items
+                let icon = createIcon('#F26B3A', false);
+                let zIndexOffset = 0;
+                let finalTitle = title;
+
+                // Special handling for Jesselton Quay (Accommodation)
+                const isJesselton = Math.abs(lat - 5.9904) < 0.0001 && Math.abs(lng - 116.0798) < 0.0001;
+                
+                if (isJesselton || isAccommodation) {
+                    icon = houseIcon;
+                    zIndexOffset = 1000;
+                    finalTitle = "住宿: Jesselton Quay"; // Force accommodation title
+                }
+
+                const popupContent = `
+                    <div style="font-family: 'Noto Sans TC', sans-serif; padding: 4px;">
+                        <h3 style="font-weight: 700; color: #2D3436; margin-bottom: 4px; font-size: 14px;">${finalTitle}</h3>
+                        ${address ? `<div style="font-size: 11px; color: #666; margin-bottom: 4px;">${address}</div>` : ''}
+                        ${url ? `<a href="${url}" target="_blank" style="color: #0077BE; text-decoration: none; font-size: 12px; display: flex; align-items: center; gap: 4px;">開啟 Google Maps <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>` : ''}
+                    </div>
+                `;
+                
+                const m = L.marker([lat, lng], { icon, zIndexOffset }).addTo(mapInstance.current).bindPopup(popupContent);
+                m.bindTooltip(finalTitle, { permanent: true, direction: 'bottom', className: 'custom-map-label' });
+                markersRef.current.push(m);
+                bounds.extend([lat, lng]);
+                processedCoords.add(key);
+            };
+
+            // 1. Always Add Accommodation Base First (Ensures House Icon)
+            addMarker(5.9904, 116.0798, "住宿: Jesselton Quay", "https://maps.app.goo.gl/3R1xZLhLTuicD3GB6", "Jesselton Quay, 88000 Kota Kinabalu", true);
+
+            // 2. Add Items
             activePlan.items.forEach(item => {
-                const addM = (lat, lng, title, url, address) => {
-                    const popupContent = `
-                        <div style="font-family: 'Noto Sans TC', sans-serif; padding: 4px;">
-                            <h3 style="font-weight: 700; color: #2D3436; margin-bottom: 4px; font-size: 14px;">${title}</h3>
-                            ${address ? `<div style="font-size: 11px; color: #666; margin-bottom: 4px;">${address}</div>` : ''}
-                            ${url ? `<a href="${url}" target="_blank" style="color: #0077BE; text-decoration: none; font-size: 12px; display: flex; align-items: center; gap: 4px;">開啟 Google Maps <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg></a>` : ''}
-                        </div>
-                    `;
-                    const m = L.marker([lat, lng], { icon: createIcon('#F26B3A', false) }).addTo(mapInstance.current).bindPopup(popupContent);
-                    m.bindTooltip(title, { permanent: true, direction: 'bottom', className: 'custom-map-label' });
-                    markersRef.current.push(m);
-                    bounds.extend([lat, lng]);
-                };
-                if (item.coords) addM(item.coords.lat, item.coords.lng, item.activity, item.coords.url, item.coords.address);
-                if (item.options) item.options.forEach(opt => addM(opt.coords.lat, opt.coords.lng, opt.activity, opt.coords.url || opt.imageUrl, opt.coords.address)); 
+                if (item.coords) {
+                     addMarker(item.coords.lat, item.coords.lng, item.activity, item.coords.url, item.coords.address);
+                }
+                if (item.options) {
+                    item.options.forEach(opt => {
+                        if (opt.coords) {
+                            addMarker(opt.coords.lat, opt.coords.lng, opt.activity, opt.coords.url || opt.imageUrl, opt.coords.address);
+                        }
+                    });
+                } 
             });
 
             if (markersRef.current.length > 0) {
@@ -860,25 +886,7 @@
       };
 
       // --- ShoppingList ---
-      const ShoppingList = () => {
-        // State initialized with localStorage or defaults
-        const [locs, setLocs] = useState(() => {
-            try {
-                const saved = localStorage.getItem('sabah_shopping_locs');
-                return saved ? JSON.parse(saved) : INITIAL_SHOPPING_LOCATIONS;
-            } catch(e) { return INITIAL_SHOPPING_LOCATIONS; }
-        });
-        const [items, setItems] = useState(() => {
-            try {
-                const saved = localStorage.getItem('sabah_shopping_items');
-                return saved ? JSON.parse(saved) : INITIAL_SHOPPING_ITEMS;
-            } catch(e) { return INITIAL_SHOPPING_ITEMS; }
-        });
-
-        // Persist changes
-        useEffect(() => localStorage.setItem('sabah_shopping_locs', JSON.stringify(locs)), [locs]);
-        useEffect(() => localStorage.setItem('sabah_shopping_items', JSON.stringify(items)), [items]);
-        
+      const ShoppingList = ({ locs, setLocs, items, setItems }) => {
         // UI State
         const [expandedLocs, setExpandedLocs] = useState(false);
         const [selItem, setSelItem] = useState(null); // For detail view
@@ -1095,26 +1103,8 @@
          </div>
       );
 
-      const InfoPage = () => {
-         const DEFAULT_CHECKLIST = [
-             {id: 1, text: "護照 (效期 > 6個月)", checked: false},
-             {id: 2, text: "MDAC 電子入境卡填寫", checked: false},
-             {id: 3, text: "機票電子檔存手機", checked: false},
-             {id: 4, text: "萬用轉接頭 (英規三孔)", checked: false},
-             {id: 5, text: "Grab App 下載並綁卡", checked: false},
-             {id: 6, text: "台幣現金 (約 NT$ 10,000)", checked: false},
-             {id: 7, text: "腸胃藥 / 暈船藥 / 防蚊液", checked: false}
-         ];
-
-         const [checklist, setChecklist] = useState(() => {
-             const saved = localStorage.getItem('sabah_checklist');
-             return saved ? JSON.parse(saved) : DEFAULT_CHECKLIST;
-         });
+      const InfoPage = ({ checklist, setChecklist }) => {
          const [txt, setTxt] = useState("");
-
-         useEffect(() => {
-             localStorage.setItem('sabah_checklist', JSON.stringify(checklist));
-         }, [checklist]);
 
          const addCheckItem = () => {
              if (!txt.trim()) return;
@@ -1270,15 +1260,110 @@
         </button>
       );
 
+      // --- Helpers for Safe JSON Parsing ---
+      const safeParse = (key, fallback) => {
+        try {
+          const item = localStorage.getItem(key);
+          return item ? JSON.parse(item) : fallback;
+        } catch (e) {
+          return fallback;
+        }
+      };
+
       const App = () => {
         const [showSplash, setShowSplash] = useState(true);
         const [activeTab, setActiveTab] = useState('plan');
-        const [dayPlans, setDayPlans] = useState(INITIAL_ITINERARY);
-        const [expenses, setExpenses] = useState([]);
         const [selectedDate, setSelectedDate] = useState(INITIAL_ITINERARY[0].date);
-        const currentDayPlan = dayPlans.find(d => d.date === selectedDate) || dayPlans[0];
 
+        // --- LIFTED STATE & LOCAL STORAGE BACKUP INITIALIZATION ---
+        // We load from LocalStorage first (instant load), then useEffect will fetch Cloud
+        const [dayPlans, setDayPlans] = useState(() => safeParse('sabah_dayPlans', INITIAL_ITINERARY));
+        const [expenses, setExpenses] = useState(() => safeParse('sabah_expenses', []));
+        const [shoppingLocs, setShoppingLocs] = useState(() => safeParse('sabah_shopping_locs', INITIAL_SHOPPING_LOCATIONS));
+        const [shoppingItems, setShoppingItems] = useState(() => safeParse('sabah_shopping_items', INITIAL_SHOPPING_ITEMS));
+        const [checklist, setChecklist] = useState(() => safeParse('sabah_checklist', DEFAULT_CHECKLIST));
+
+        const [isSyncing, setIsSyncing] = useState(false);
+        const [lastSyncTime, setLastSyncTime] = useState(null);
+
+        // --- CLOUD SYNC LOGIC (PANTRY.CLOUD) ---
+        
+        // 1. LOAD: Fetch data from Pantry on mount
+        useEffect(() => {
+          if (!PANTRY_ID) return;
+
+          const fetchData = async () => {
+             setIsSyncing(true);
+             try {
+                // To avoid CORS issues, sometimes a proxy is needed, but Pantry usually supports CORS.
+                // Using a timestamp to bypass browser caching
+                const res = await fetch(`https://getpantry.cloud/apiv1/pantry/${PANTRY_ID}/basket/${PANTRY_BASKET_NAME}?_t=${Date.now()}`);
+                if (res.ok) {
+                   const data = await res.json();
+                   // Merge logic: Only update if cloud data exists
+                   if (data.itinerary) setDayPlans(data.itinerary);
+                   if (data.expenses) setExpenses(data.expenses);
+                   if (data.shoppingLocs) setShoppingLocs(data.shoppingLocs);
+                   if (data.shoppingItems) setShoppingItems(data.shoppingItems);
+                   if (data.checklist) setChecklist(data.checklist);
+                   setLastSyncTime(new Date());
+                } else {
+                   console.warn("Pantry: No basket found or error, using local data.");
+                }
+             } catch (e) {
+                console.error("Sync Error:", e);
+             } finally {
+                setIsSyncing(false);
+             }
+          };
+
+          fetchData();
+        }, []);
+
+        // 2. SAVE: Debounced save to Cloud & Instant save to LocalStorage
+        // We combine all data into one object for the "Basket"
+        useEffect(() => {
+            // A. Local Backup (Instant)
+            localStorage.setItem('sabah_dayPlans', JSON.stringify(dayPlans));
+            localStorage.setItem('sabah_expenses', JSON.stringify(expenses));
+            localStorage.setItem('sabah_shopping_locs', JSON.stringify(shoppingLocs));
+            localStorage.setItem('sabah_shopping_items', JSON.stringify(shoppingItems));
+            localStorage.setItem('sabah_checklist', JSON.stringify(checklist));
+
+            // B. Cloud Save (Debounced 2s to avoid spamming API)
+            if (!PANTRY_ID) return;
+
+            const timer = setTimeout(async () => {
+                setIsSyncing(true);
+                try {
+                    const payload = {
+                        itinerary: dayPlans,
+                        expenses,
+                        shoppingLocs,
+                        shoppingItems,
+                        checklist
+                    };
+                    
+                    await fetch(`https://getpantry.cloud/apiv1/pantry/${PANTRY_ID}/basket/${PANTRY_BASKET_NAME}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    setLastSyncTime(new Date());
+                } catch(e) {
+                    console.error("Save Error:", e);
+                } finally {
+                    setIsSyncing(false);
+                }
+            }, 2000);
+
+            return () => clearTimeout(timer);
+        }, [dayPlans, expenses, shoppingLocs, shoppingItems, checklist]);
+
+
+        // Helper to update specific day in itinerary
         const handleUpdateDay = (updated) => setDayPlans(prev => prev.map(d => d.date === updated.date ? updated : d));
+        const currentDayPlan = dayPlans.find(d => d.date === selectedDate) || dayPlans[0];
 
         return (
           <HashRouter>
@@ -1297,7 +1382,19 @@
                  
                  {activeTab === 'plan' && (
                     <div className="relative z-20 bg-white/30 backdrop-blur-md shadow-sm border-b border-white/20 pb-4 pt-safe flex flex-col gap-4">
-                       <div className="text-center mt-6 px-4"><h2 className="text-3xl font-serif font-bold text-sabah-dark tracking-wide">Sabah | 亞庇海中遊</h2></div>
+                       <div className="text-center mt-6 px-4 relative">
+                          <h2 className="text-3xl font-serif font-bold text-sabah-dark tracking-wide">Sabah | 亞庇海中遊</h2>
+                          {/* Sync Indicator */}
+                          <div className="absolute right-4 top-1 flex items-center gap-1">
+                             {isSyncing ? (
+                                <RefreshCw size={14} className="text-sabah-blue animate-spin" />
+                             ) : lastSyncTime ? (
+                                <Cloud size={14} className="text-sabah-green" />
+                             ) : (
+                                <Cloud size={14} className="text-gray-400" />
+                             )}
+                          </div>
+                       </div>
                        <div className="flex items-end justify-between px-4 gap-3">
                            <div className="flex-1 overflow-hidden min-w-0"><DateSelector days={dayPlans} selectedDate={selectedDate} onSelectDate={setSelectedDate} /></div>
                            <div className="flex flex-col items-end gap-2 pb-1 flex-shrink-0">
@@ -1315,8 +1412,20 @@
                     {activeTab === 'plan' && <ItineraryList dayPlan={currentDayPlan} onUpdate={handleUpdateDay} />}
                     {activeTab === 'map' && <MapComponent dayPlans={dayPlans} selectedDate={selectedDate} />}
                     {activeTab === 'wallet' && <ExpenseTracker expenses={expenses} onAddExpense={e=>setExpenses(p=>[...p,e])} onDeleteExpense={id=>setExpenses(p=>p.filter(x=>x.id!==id))} />}
-                    {activeTab === 'shopping' && <ShoppingList />}
-                    {activeTab === 'info' && <InfoPage />}
+                    
+                    {/* Pass lifted state to ShoppingList */}
+                    {activeTab === 'shopping' && <ShoppingList 
+                        locs={shoppingLocs} 
+                        setLocs={setShoppingLocs}
+                        items={shoppingItems}
+                        setItems={setShoppingItems}
+                    />}
+                    
+                    {/* Pass lifted state to InfoPage */}
+                    {activeTab === 'info' && <InfoPage 
+                        checklist={checklist}
+                        setChecklist={setChecklist}
+                    />}
                  </main>
 
                  <nav className="relative z-50 bg-white/95 backdrop-blur-xl border-t border-gray-100 pb-safe shadow-[0_-10px_40px_rgba(0,0,0,0.05)]">
