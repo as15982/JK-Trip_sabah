@@ -1285,43 +1285,88 @@
 
         const [isSyncing, setIsSyncing] = useState(false);
         const [lastSyncTime, setLastSyncTime] = useState(null);
+        
+        // Ref to track if update comes from cloud (to prevent echo-save)
+        const isRemoteUpdate = useRef(false);
+        // Ref to track syncing status for polling (state variable might be stale in interval closure)
+        const isSyncingRef = useRef(false);
 
         // --- CLOUD SYNC LOGIC (PANTRY.CLOUD) ---
         
-        // 1. LOAD: Fetch data from Pantry on mount
-        useEffect(() => {
-          if (!PANTRY_ID) return;
+        const fetchData = useCallback(async (isPolling = false) => {
+            if (!PANTRY_ID) return;
 
-          const fetchData = async () => {
-             setIsSyncing(true);
-             try {
-                // To avoid CORS issues, sometimes a proxy is needed, but Pantry usually supports CORS.
-                // Using a timestamp to bypass browser caching
-                const res = await fetch(`https://getpantry.cloud/apiv1/pantry/${PANTRY_ID}/basket/${PANTRY_BASKET_NAME}?_t=${Date.now()}`);
-                if (res.ok) {
-                   const data = await res.json();
-                   // Merge logic: Only update if cloud data exists
-                   if (data.itinerary) setDayPlans(data.itinerary);
-                   if (data.expenses) setExpenses(data.expenses);
-                   if (data.shoppingLocs) setShoppingLocs(data.shoppingLocs);
-                   if (data.shoppingItems) setShoppingItems(data.shoppingItems);
-                   if (data.checklist) setChecklist(data.checklist);
-                   setLastSyncTime(new Date());
-                } else {
-                   console.warn("Pantry: No basket found or error, using local data.");
+            // 1. Input Guard (If polling)
+            if (isPolling) {
+                const activeTag = document.activeElement?.tagName;
+                if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') {
+                    return; // User is typing, skip update
                 }
-             } catch (e) {
-                console.error("Sync Error:", e);
-             } finally {
-                setIsSyncing(false);
-             }
-          };
+                // Avoid conflict if already syncing
+                if (isSyncingRef.current) return; 
+            }
 
-          fetchData();
+            setIsSyncing(true);
+            isSyncingRef.current = true;
+
+            try {
+                // Use cache: 'no-store' instead of query param to avoid potential URL issues or cache pollution
+                const res = await fetch(`https://getpantry.cloud/apiv1/pantry/${PANTRY_ID}/basket/${PANTRY_BASKET_NAME}`, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                    cache: 'no-store'
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    
+                    // Mark as remote update to prevent auto-save triggering
+                    isRemoteUpdate.current = true;
+
+                    if (data.itinerary) setDayPlans(data.itinerary);
+                    if (data.expenses) setExpenses(data.expenses);
+                    if (data.shoppingLocs) setShoppingLocs(data.shoppingLocs);
+                    if (data.shoppingItems) setShoppingItems(data.shoppingItems);
+                    if (data.checklist) setChecklist(data.checklist);
+                    
+                    setLastSyncTime(new Date());
+                } else {
+                    // Handle 404 (Basket not found) - this is normal for a new app
+                    if (res.status === 404) {
+                        console.log("Pantry basket not found, will be created on first save.");
+                        return; 
+                    }
+                    console.warn(`Pantry Sync Status: ${res.status}`);
+                }
+            } catch (e) {
+                // Only log detailed error if NOT polling, or if it's a specific network error we care about.
+                // Failed to fetch is usually network or blockage.
+                if (!isPolling) {
+                     console.warn("Sync failed (Network/Blocker):", e);
+                }
+            } finally {
+                setIsSyncing(false);
+                isSyncingRef.current = false;
+            }
         }, []);
 
-        // 2. SAVE: Debounced save to Cloud & Instant save to LocalStorage
-        // We combine all data into one object for the "Basket"
+        // 1. Initial Load
+        useEffect(() => {
+            fetchData(false);
+        }, [fetchData]);
+
+        // 2. Auto-Polling (Every 5s)
+        useEffect(() => {
+            const interval = setInterval(() => {
+                fetchData(true);
+            }, 5000);
+            return () => clearInterval(interval);
+        }, [fetchData]);
+
+        // 3. SAVE Logic
         useEffect(() => {
             // A. Local Backup (Instant)
             localStorage.setItem('sabah_dayPlans', JSON.stringify(dayPlans));
@@ -1330,11 +1375,18 @@
             localStorage.setItem('sabah_shopping_items', JSON.stringify(shoppingItems));
             localStorage.setItem('sabah_checklist', JSON.stringify(checklist));
 
-            // B. Cloud Save (Debounced 2s to avoid spamming API)
+            // B. Cloud Save
             if (!PANTRY_ID) return;
+
+            // Check if this was a remote update
+            if (isRemoteUpdate.current) {
+                isRemoteUpdate.current = false;
+                return;
+            }
 
             const timer = setTimeout(async () => {
                 setIsSyncing(true);
+                isSyncingRef.current = true;
                 try {
                     const payload = {
                         itinerary: dayPlans,
@@ -1351,11 +1403,13 @@
                     });
                     setLastSyncTime(new Date());
                 } catch(e) {
-                    console.error("Save Error:", e);
+                    // Silently fail on save error to avoid user disruption, or log warning
+                    console.warn("Save Error:", e);
                 } finally {
                     setIsSyncing(false);
+                    isSyncingRef.current = false;
                 }
-            }, 2000);
+            }, 2000); // 2s Debounce
 
             return () => clearTimeout(timer);
         }, [dayPlans, expenses, shoppingLocs, shoppingItems, checklist]);
