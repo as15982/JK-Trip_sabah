@@ -1288,8 +1288,12 @@
         
         // Ref to track if update comes from cloud (to prevent echo-save)
         const isRemoteUpdate = useRef(false);
-        // Ref to track syncing status for polling (state variable might be stale in interval closure)
+        // Ref to track syncing status for polling
         const isSyncingRef = useRef(false);
+        // Ref to track if we have unsaved local changes (isDirty)
+        const isDirty = useRef(false);
+        // Ref to track the version of local changes
+        const changeId = useRef(0);
 
         // --- CLOUD SYNC LOGIC (PANTRY.CLOUD) ---
         
@@ -1302,8 +1306,8 @@
                 if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') {
                     return; // User is typing, skip update
                 }
-                // Avoid conflict if already syncing
-                if (isSyncingRef.current) return; 
+                // Avoid conflict if already syncing OR if we have unsaved changes (dirty)
+                if (isSyncingRef.current || isDirty.current) return; 
             }
 
             setIsSyncing(true);
@@ -1381,8 +1385,15 @@
             // Check if this was a remote update
             if (isRemoteUpdate.current) {
                 isRemoteUpdate.current = false;
+                // If it was a remote update, we are clean (changeId shouldn't increment)
+                isDirty.current = false;
                 return;
             }
+
+            // Mark as dirty and increment change ID
+            isDirty.current = true;
+            changeId.current += 1;
+            const currentChangeId = changeId.current;
 
             const timer = setTimeout(async () => {
                 setIsSyncing(true);
@@ -1402,6 +1413,12 @@
                         body: JSON.stringify(payload)
                     });
                     setLastSyncTime(new Date());
+
+                    // Mark as clean ONLY if no new changes occurred during the save
+                    if (changeId.current === currentChangeId) {
+                        isDirty.current = false;
+                    }
+
                 } catch(e) {
                     // Silently fail on save error to avoid user disruption, or log warning
                     console.warn("Save Error:", e);
