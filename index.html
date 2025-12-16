@@ -755,12 +755,15 @@
             // 2. Add Items
             activePlan.items.forEach(item => {
                 if (item.coords) {
-                     addMarker(item.coords.lat, item.coords.lng, item.activity, item.coords.url, item.coords.address);
+                     // PRIORITIZE: Landmark Name > Location Description > Activity Title
+                     const label = item.coords.name || item.location || item.activity;
+                     addMarker(item.coords.lat, item.coords.lng, label, item.coords.url, item.coords.address);
                 }
                 if (item.options) {
                     item.options.forEach(opt => {
                         if (opt.coords) {
-                            addMarker(opt.coords.lat, opt.coords.lng, opt.activity, opt.coords.url || opt.imageUrl, opt.coords.address);
+                            const label = opt.coords.name || opt.location || opt.activity;
+                            addMarker(opt.coords.lat, opt.coords.lng, label, opt.coords.url || opt.imageUrl, opt.coords.address);
                         }
                     });
                 } 
@@ -897,6 +900,36 @@
         const [formDesc, setFormDesc] = useState('');
         const [formLink, setFormLink] = useState('');
         const [formImg, setFormImg] = useState('');
+        
+        // Editing State
+        const [editId, setEditId] = useState(null);
+        
+        // Action Mode State (for Long Press)
+        const [activeActionId, setActiveActionId] = useState(null);
+        const timerRef = useRef(null);
+
+        const startPress = (id) => {
+            timerRef.current = setTimeout(() => {
+                if(navigator.vibrate) navigator.vibrate(50);
+                setActiveActionId(id);
+            }, 800); 
+        };
+
+        const endPress = () => {
+            if(timerRef.current) {
+                clearTimeout(timerRef.current);
+                timerRef.current = null;
+            }
+        };
+
+        // Close actions when clicking outside (global listener for safety)
+        useEffect(() => {
+            const handleClickOutside = () => {
+                if(activeActionId) setActiveActionId(null);
+            };
+            if(activeActionId) window.addEventListener('click', handleClickOutside);
+            return () => window.removeEventListener('click', handleClickOutside);
+        }, [activeActionId]);
 
         const handleImageUpdate = (id, newSrc, type) => {
             if (type === 'location') {
@@ -909,27 +942,48 @@
         const handleAddSubmit = (e) => {
             e.preventDefault();
             const newItem = {
-                id: Date.now().toString(),
+                id: editId || Date.now().toString(),
                 name: formName,
                 description: formDesc,
                 imageUrl: formImg,
                 url: formLink, // Store map link directly
                 googleMapQuery: formLink, // Legacy support
                 type: addType === 'location' ? '自訂地點' : '自訂商品',
-                rating: 5
+                rating: 5,
+                // Preserve locationHint if editing
+                locationHint: editId ? (items.find(i=>i.id===editId)?.locationHint) : ''
             };
             
             if (addType === 'location') {
-                setLocs([...locs, newItem]);
+                if(editId) setLocs(prev => prev.map(l => l.id === editId ? { ...l, ...newItem } : l));
+                else setLocs([...locs, newItem]);
             } else {
-                setItems([...items, newItem]);
+                if(editId) setItems(prev => prev.map(i => i.id === editId ? { ...i, ...newItem } : i));
+                else setItems([...items, newItem]);
             }
             closeModal();
         };
 
         const closeModal = () => {
             setAddType(null);
+            setEditId(null);
             setFormName(''); setFormDesc(''); setFormLink(''); setFormImg('');
+        };
+        
+        const handleEdit = (item, type) => {
+            setAddType(type);
+            setEditId(item.id);
+            setFormName(item.name);
+            setFormDesc(item.description);
+            setFormLink(item.url || item.googleMapQuery || '');
+            setFormImg(item.imageUrl);
+        };
+
+        const handleDelete = (id, type) => {
+             if(confirm('確定要刪除嗎？')) {
+                 if(type === 'location') setLocs(prev => prev.filter(l => l.id !== id));
+                 else setItems(prev => prev.filter(i => i.id !== id));
+             }
         };
         
         const handleFileSelect = (e) => {
@@ -982,17 +1036,35 @@
                    {expandedLocs && (
                        <div className="flex flex-col gap-3 animate-fade-in">
                            {locs.map(l=>(
-                               <div key={l.id} className="bg-white/90 rounded-2xl p-4 border border-white/50 flex gap-4 shadow-sm">
-                                   <div className="flex-1 min-w-0">
+                               <div 
+                                    key={l.id} 
+                                    className="bg-white/90 rounded-2xl p-4 border border-white/50 flex gap-4 shadow-sm relative group select-none transition-transform active:scale-[0.98]"
+                                    onMouseDown={()=>startPress(l.id)} onMouseUp={endPress} onMouseLeave={endPress}
+                                    onTouchStart={()=>startPress(l.id)} onTouchEnd={endPress}
+                                    onContextMenu={e=>e.preventDefault()}
+                               >
+                                   <div className="flex-1 min-w-0 pr-1">
                                        <div className="flex items-center gap-2 mb-1">
                                            <h4 className="font-bold text-sabah-dark truncate">{l.name}</h4>
-                                           {(l.url || l.googleMapQuery) && <a href={l.url || `https://www.google.com/maps/search/?api=1&query=${l.googleMapQuery}`} target="_blank" className="text-gray-400 hover:text-sabah-blue p-1"><MapPin size={14}/></a>}
+                                           {(l.url || l.googleMapQuery) && <a href={l.url || `https://www.google.com/maps/search/?api=1&query=${l.googleMapQuery}`} target="_blank" className="text-gray-400 hover:text-sabah-blue p-1" onClick={e=>e.stopPropagation()}><MapPin size={14}/></a>}
                                        </div>
                                        <p className="text-xs text-gray-500 line-clamp-2">{l.description}</p>
                                    </div>
                                    <div className="w-20 h-20 bg-gray-100 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100">
                                        <EditableImage src={l.imageUrl} alt={l.name} className="w-full h-full" onImageChange={(src)=>handleImageUpdate(l.id, src, 'location')} />
                                    </div>
+                                   
+                                   {/* Action Overlay */}
+                                   {activeActionId === l.id && (
+                                       <div className="absolute inset-0 bg-white/90 backdrop-blur-md z-20 flex items-center justify-center gap-6 rounded-2xl animate-fade-in" onClick={(e)=>e.stopPropagation()}>
+                                            <button onClick={() => { handleEdit(l, 'location'); setActiveActionId(null); }} className="w-12 h-12 rounded-full bg-sabah-blue text-white flex items-center justify-center shadow-lg hover:scale-110 transition-transform">
+                                                <Pencil size={20} />
+                                            </button>
+                                            <button onClick={() => { handleDelete(l.id, 'location'); setActiveActionId(null); }} className="w-12 h-12 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg hover:scale-110 transition-transform">
+                                                <Trash2 size={20} />
+                                            </button>
+                                       </div>
+                                   )}
                                </div>
                            ))}
                        </div>
@@ -1007,18 +1079,36 @@
                    </div>
                    <div className="grid grid-cols-2 gap-4">
                        {items.map(i=>(
-                           <div key={i.id} className="bg-white/90 rounded-2xl p-3 shadow-card border border-white/50 relative group">
-                               <div className="aspect-square bg-gray-100 rounded-xl mb-3 overflow-hidden border border-gray-100">
-                                   {/* Long press enabled via EditableImage */}
-                                   <EditableImage src={i.imageUrl} alt={i.name} className="w-full h-full" onImageChange={(src)=>handleImageUpdate(i.id, src, 'item')} />
+                           <div 
+                                key={i.id} 
+                                className="bg-white/90 rounded-2xl p-3 shadow-card border border-white/50 relative group select-none transition-transform active:scale-[0.98]"
+                                onMouseDown={()=>startPress(i.id)} onMouseUp={endPress} onMouseLeave={endPress}
+                                onTouchStart={()=>startPress(i.id)} onTouchEnd={endPress}
+                                onContextMenu={e=>e.preventDefault()}
+                                onClick={()=>{ if(activeActionId !== i.id) setSelItem(i); }}
+                           >
+                               <div className="aspect-square bg-gray-100 rounded-xl mb-3 overflow-hidden border border-gray-100 pointer-events-none">
+                                   <img src={i.imageUrl} alt={i.name} className="w-full h-full object-cover" onError={handleImageError} />
                                </div>
-                               <div onClick={()=>setSelItem(i)} className="cursor-pointer">
+                               <div>
                                     <div className="flex justify-between items-start gap-1">
                                         <h4 className="font-bold text-sabah-dark text-xs mb-1 line-clamp-1 flex-1">{i.name}</h4>
                                         {(i.url || i.locationHint) && <MapPin size={10} className="text-gray-400 mt-0.5 flex-shrink-0"/>}
                                     </div>
                                     <p className="text-[10px] text-gray-500 line-clamp-2">{i.description}</p>
                                </div>
+
+                               {/* Action Overlay */}
+                               {activeActionId === i.id && (
+                                   <div className="absolute inset-0 bg-white/90 backdrop-blur-md z-20 flex items-center justify-center gap-4 rounded-2xl animate-fade-in" onClick={(e)=>e.stopPropagation()}>
+                                        <button onClick={() => { handleEdit(i, 'item'); setActiveActionId(null); }} className="w-10 h-10 rounded-full bg-sabah-blue text-white flex items-center justify-center shadow-lg hover:scale-110 transition-transform">
+                                            <Pencil size={18} />
+                                        </button>
+                                        <button onClick={() => { handleDelete(i.id, 'item'); setActiveActionId(null); }} className="w-10 h-10 rounded-full bg-red-500 text-white flex items-center justify-center shadow-lg hover:scale-110 transition-transform">
+                                            <Trash2 size={18} />
+                                        </button>
+                                   </div>
+                               )}
                            </div>
                        ))}
                    </div>
@@ -1031,7 +1121,7 @@
                        <div className="bg-white rounded-[32px] p-6 w-full max-w-sm relative z-10 animate-[fadeIn_0.3s_ease-out]">
                            <button onClick={()=>setSelItem(null)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full"><X size={16} className="text-gray-500"/></button>
                            <div className="aspect-[4/3] rounded-2xl bg-gray-100 overflow-hidden mb-5 border border-gray-200">
-                               <img src={selItem.imageUrl} className="w-full h-full object-cover" onError={handleImageError}/>
+                               <EditableImage src={selItem.imageUrl} alt={selItem.name} className="w-full h-full" onImageChange={(src)=>handleImageUpdate(selItem.id, src, 'item')} />
                            </div>
                            <h2 className="text-2xl font-serif font-bold text-sabah-dark mb-2">{selItem.name}</h2>
                            <p className="text-sm text-gray-600 leading-relaxed mb-4">{selItem.description}</p>
@@ -1041,12 +1131,12 @@
                    </div>
                )}
 
-               {/* Modal: Add New */}
+               {/* Modal: Add New / Edit */}
                {addType && (
                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
                        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={closeModal}></div>
                        <form onSubmit={handleAddSubmit} className="bg-white rounded-[32px] p-6 w-full max-w-sm relative z-10 animate-[fadeIn_0.3s_ease-out] max-h-[90vh] overflow-y-auto">
-                           <h3 className="text-xl font-serif font-bold text-sabah-dark mb-4">新增{addType==='location'?'地點':'商品'}</h3>
+                           <h3 className="text-xl font-serif font-bold text-sabah-dark mb-4">{editId ? '編輯' : '新增'}{addType==='location'?'地點':'商品'}</h3>
                            
                            <div className="space-y-4">
                                <div>
@@ -1083,7 +1173,7 @@
 
                            <div className="flex gap-3 mt-8">
                                <button type="button" onClick={closeModal} className="flex-1 py-3 rounded-xl font-bold text-sm text-gray-500 bg-gray-100 hover:bg-gray-200">取消</button>
-                               <button type="submit" className="flex-1 py-3 rounded-xl font-bold text-sm text-white bg-sabah-blue shadow-lg shadow-blue-500/30 hover:bg-blue-600">新增</button>
+                               <button type="submit" className="flex-1 py-3 rounded-xl font-bold text-sm text-white bg-sabah-blue shadow-lg shadow-blue-500/30 hover:bg-blue-600">{editId ? '儲存' : '新增'}</button>
                            </div>
                        </form>
                    </div>
