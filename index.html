@@ -247,7 +247,7 @@
               { activity: '源茶室 Guan\'s Kopitiam', location: 'Jalan Gaya', coords: LOCATIONS.GUANS_KOPITIAM, notes: '復古風格，推薦咖椰吐司與叻沙', imageUrl: 'https://images.unsplash.com/photo-1559403842-70b925b4be46?q=80&w=500' },
               { activity: '發記魚雜 Fatt Kee', location: 'Kolam Centre, Jln Lintas', coords: LOCATIONS.FATT_KEE_FISH, notes: '在地超人氣魚雜，湯頭鮮甜濃郁', imageUrl: 'https://images.unsplash.com/photo-1591814447921-7fa73d3e86f1?q=80&w=500' }
             ], travelTime: 'Grab 15分' },
-            { id: '4-2', time: '11:00', duration: 180, activity: '購物：Imago Shopping Mall', location: 'KK Times Square', coords: LOCATIONS.IMAGO_MALL, type: 'shopping', notes: '亞庇最好逛的商場，買 Bata、Padini、超市伴手禮', travelTime: 'Grab 20分' },
+            { id: '4-2', time: '11:00', duration: 180, activity: '購物：Imago Shopping Mall', location: 'KK Times Square', coords: LOCATIONS.IMAGO_MALL, type: 'shopping', notes: '亞庇最好逛的商場，買 Bata、Padini、超市伴手禮', travelTime: 'Grab 15分' },
             { id: '4-3', time: '14:30', duration: 60, activity: '回到住宿: 換衣服、放置東西', location: 'Jesselton Quay (JQ)', coords: LOCATIONS.JESSELTON_QUAY, type: 'relax', notes: '整理戰利品，換上輕便服裝準備看夕陽', travelTime: 'Grab 15分' },
             { id: '4-4', time: '15:30', duration: 180, activity: '夕陽：落日SUP', location: 'Tanjung Aru Beach', coords: LOCATIONS.TANJUNG_ARU_BEACH, type: 'activity', notes: '世界級落日景觀，體驗站立划槳划向夕陽', imageUrl: 'https://images.unsplash.com/photo-1500375592092-40eb2168fd21?q=80&w=500', travelTime: 'Grab 20分' },
             { id: '4-5', time: '19:30', duration: 90, activity: '晚餐：大茄來海鮮餐廳', location: 'Kompleks Asia City', coords: LOCATIONS.WELCOME_SEAFOOD, type: 'food', notes: '必點：濕奶油老虎蝦、鹹蛋黃炒蟹、桔子冰', imageUrl: 'https://images.unsplash.com/photo-1565557623262-b51c2513a641?q=80&w=500', travelTime: 'Grab 15分' },
@@ -638,8 +638,8 @@
                          {item.options && (
                              <div className={`flex gap-4 pb-2 -mx-2 px-2 mt-2 ${editingId === item.id ? 'flex-col' : 'overflow-x-auto snap-x no-scrollbar'}`}>
                                 {item.options.map((opt, idx) => (
-                                    <div key={idx} className={`${editingId === item.id ? 'w-full' : 'min-w-[85%] snap-center'} bg-white/85 backdrop-blur-md rounded-[24px] p-4 shadow-card border border-white/40 flex gap-3`}>
-                                        <div className="flex-1">
+                                    <div key={idx} className={`${editingId === item.id ? 'w-full' : 'min-w-[85%] snap-center'} bg-white/85 backdrop-blur-md rounded-[24px] p-4 shadow-card border border-white/40 flex gap-3 flex-wrap`}>
+                                        <div className="flex-1 min-w-[60%]">
                                             {editingId === item.id ? (
                                                 <input
                                                     type="text"
@@ -661,6 +661,11 @@
                                               : <img src={opt.imageUrl} className="w-full h-full object-cover" onError={handleImageError}/>
                                             }
                                         </div>
+                                        {editingId === item.id && (
+                                            <div className="w-full mt-2">
+                                                <textarea value={opt.notes || ''} onChange={(e) => handleSaveNote(item.id, e.target.value, idx)} className="w-full text-xs bg-gray-50/50 rounded-lg p-2 border border-gray-100 outline-none h-16" placeholder={`備註 (${opt.activity})...`} />
+                                            </div>
+                                        )}
                                     </div>
                                 ))}
                              </div>
